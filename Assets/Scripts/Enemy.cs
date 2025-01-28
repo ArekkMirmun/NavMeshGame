@@ -3,73 +3,184 @@ using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
+public enum EnemyState {
+    Patrolling,
+    Alert,
+    Chasing,
+    Attacking,
+    AlertPatrolling
+}
+
 public class Enemy : MonoBehaviour
 {
+    private static readonly int Velocity = Animator.StringToHash("velocity");
     [SerializeField] private Transform path;
-    [SerializeField] private int childrenIndex;
-    [SerializeField] private Vector3 min;
-    [SerializeField] private Vector3 max;
+    [SerializeField] private float patrolSpeed = 2f;
+    [SerializeField] private float alertPatrolSpeed = 3f;
+    [SerializeField] private float chaseSpeed = 4.5f;
+    [SerializeField] private Transform[] waypoints;
 
     [SerializeField] private GameObject player;
     [SerializeField] private float playerDetectionRange = 10f;
     [SerializeField] private float playerDetectionAngle = 30f;
-    [SerializeField] private float playerDetectionInterval = 1f;
+    [SerializeField] private float playerDetectionInterval = 0.5f;
 
     [SerializeField] private Animator animator; // Reference to the Animator
-    private NavMeshAgent navMeshAgent;         // Reference to the NavMeshAgent
-    private bool playerDetected = false;
+    private NavMeshAgent _navMeshAgent;
+    [SerializeField]private EnemyState currentState;
+
+    private int _currentWaypointIndex;
+    private bool _playerDetected;
+    private bool _isAlerted;
+    private const float AlertTimer = 5f; // Time in alert state after losing sight of the player
+    private float _alertTimeLeft;
 
     void Start()
     {
-        navMeshAgent = GetComponent<NavMeshAgent>();
+        _navMeshAgent = GetComponent<NavMeshAgent>();
+        ChangeState(EnemyState.Patrolling);
         StartCoroutine(PlayerDetection());
     }
 
-    private void Update()
+    void Update()
     {
         // Update the Animator's velocity parameter based on the NavMeshAgent's velocity
-        float currentSpeed = navMeshAgent.velocity.magnitude;
-        animator.SetFloat("velocity", currentSpeed);
+        var currentSpeed = _navMeshAgent.velocity.magnitude;
+        animator.SetFloat(Velocity, currentSpeed);
+
+        // State machine logic
+        switch (currentState)
+        {
+            case EnemyState.Patrolling:
+                HandlePatrolling();
+                break;
+            case EnemyState.Alert:
+                HandleAlert();
+                break;
+            case EnemyState.Chasing:
+                HandleChasing();
+                break;
+            case EnemyState.Attacking:
+                HandleAttacking();
+                break;
+            case EnemyState.AlertPatrolling:
+                HandleAlertPatrolling();
+                break;
+        }
     }
 
+    #region State Handling
+
+    private void HandlePatrolling()
+    {
+        _navMeshAgent.speed = patrolSpeed;
+
+        if (!_navMeshAgent.hasPath || _navMeshAgent.remainingDistance < 0.1f)
+        {
+            // Go to the next waypoint
+            _navMeshAgent.SetDestination(waypoints[_currentWaypointIndex].position);
+            _currentWaypointIndex = (_currentWaypointIndex + 1) % waypoints.Length;
+        }
+    }
+
+    private void HandleAlert()
+    {
+        // Stay alert for a certain time
+        _alertTimeLeft -= Time.deltaTime;
+
+        if (_alertTimeLeft <= 0f)
+        {
+            ChangeState(_isAlerted ? EnemyState.AlertPatrolling : EnemyState.Patrolling);
+        }
+    }
+
+    private void HandleChasing()
+    {
+        _navMeshAgent.speed = chaseSpeed;
+
+        // Chase the player
+        _navMeshAgent.SetDestination(player.transform.position);
+
+        // Check distance to attack
+        if (Vector3.Distance(transform.position, player.transform.position) < 1f)
+        {
+            ChangeState(EnemyState.Attacking);
+        }
+    }
+
+    private void HandleAttacking()
+    {
+        
+        print("Attack");
+        // Reset back to chasing after attacking (for now)
+        ChangeState(EnemyState.Chasing);
+    }
+
+    private void HandleAlertPatrolling()
+    {
+        _navMeshAgent.speed = alertPatrolSpeed;
+
+        if (!_navMeshAgent.hasPath || _navMeshAgent.remainingDistance < 0.1f)
+        {
+            // Go to the next waypoint in alert mode
+            _navMeshAgent.SetDestination(waypoints[_currentWaypointIndex].position);
+            _currentWaypointIndex = (_currentWaypointIndex + 1) % waypoints.Length;
+        }
+    }
+
+    private void ChangeState(EnemyState newState)
+    {
+        currentState = newState;
+
+        // Reset NavMeshAgent for specific states if needed
+        if (newState != EnemyState.Attacking)
+        {
+            _navMeshAgent.isStopped = false;
+        }
+    }
+
+    
+    #endregion
+    
+    #region Player Detection
+    
     private IEnumerator PlayerDetection()
     {
         while (true)
         {
-            // Get direction and angle between player and enemy
             Vector3 direction = player.transform.position - transform.position;
             float angle = Vector3.Angle(direction, transform.forward);
-            RaycastHit hit;
 
-            // If player is within range and angle
             if (Vector3.Distance(transform.position, player.transform.position) < playerDetectionRange && angle < playerDetectionAngle)
             {
-                // If raycast hits player
-                if (Physics.Raycast(transform.position, direction, out hit))
+                if (Physics.Raycast(transform.position, direction, out var hit))
                 {
                     if (hit.collider.gameObject == player)
                     {
-                        navMeshAgent.SetDestination(player.transform.position);
-                        playerDetected = true;
-                        //look at player
-                        transform.LookAt(player.transform);
-                    }
-                    else
-                    {
-                        playerDetected = false;
+                        _playerDetected = true;
+                        _isAlerted = true;
+                        _alertTimeLeft = AlertTimer;
+
+                        ChangeState(EnemyState.Chasing);
                     }
                 }
             }
             else
             {
-                playerDetected = false;
+                _playerDetected = false;
+
+                if (currentState == EnemyState.Chasing)
+                {
+                    ChangeState(EnemyState.Alert);
+                }
             }
 
-            // Wait for the next detection cycle
             yield return new WaitForSeconds(playerDetectionInterval);
         }
     }
+    #endregion
     
+    #region Kill Player
     
     private void OnTriggerEnter(Collider other)
     {
@@ -78,13 +189,5 @@ public class Enemy : MonoBehaviour
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
     }
-    
-    private void OnDrawGizmos()
-    {
-        //Show in game
-        Debug.DrawRay(transform.position, transform.forward * playerDetectionRange, playerDetected ? Color.red : Color.green);
-        Debug.DrawRay(transform.position, Quaternion.Euler(0, playerDetectionAngle, 0) * transform.forward * playerDetectionRange, playerDetected ? Color.red : Color.green);
-        Debug.DrawRay(transform.position, Quaternion.Euler(0, -playerDetectionAngle, 0) * transform.forward * playerDetectionRange, playerDetected ? Color.red : Color.green);
-        
-    }
+    #endregion
 }

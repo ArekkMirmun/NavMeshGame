@@ -281,14 +281,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   path: {fileID: 0}
-  childrenIndex: 0
-  min: {x: -9, y: 0, z: -4}
-  max: {x: 9, y: 0, z: 4}
+  patrolSpeed: 1
+  alertPatrolSpeed: 2
+  chaseSpeed: 3
+  waypoints:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   player: {fileID: 0}
   playerDetectionRange: 5
   playerDetectionAngle: 60
   playerDetectionInterval: 0.01
   animator: {fileID: 6712346919978507542}
+  currentState: 0
 --- !u!95 &6712346919978507542
 Animator:
   serializedVersion: 7
